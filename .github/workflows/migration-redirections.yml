@@ -1,0 +1,170 @@
+# Runs playwright/tests/special/migration_redirections.spec.ts against a live site.
+#
+# Modelled on react-testing's qa-tests.yml / run-any-test.yml, but self-contained:
+# this repo has none of react-testing's composite actions (set-site-env,
+# install-dependencies, run-playwright-test, process-playwright-report), so the
+# equivalent steps are inlined here, and it runs on ubuntu-latest instead of the
+# self-hosted arc-runner-set-* pool.
+#
+# Manual only (plus workflow_call): the test hits a production site once per CSV
+# row, so it should not fire on every push.
+name: Migration Redirections Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Base URL used to resolve relative "To" paths'
+        required: true
+        type: string
+        default: 'https://www.mgalleryboutique.com'
+      catalog_id:
+        description: 'Site code (used in the report filename)'
+        required: true
+        type: string
+        default: 'mgl'
+      test_env:
+        description: 'Environment label (used in the report filename)'
+        required: true
+        type: choice
+        options:
+          - stage
+          - production
+        default: 'stage'
+      csv_path:
+        description: 'CSV of redirections, relative to the repo root'
+        required: false
+        type: string
+        default: 'input/migration_redirections.csv'
+      max_rows:
+        description: 'Max CSV rows to check (0 = all)'
+        required: false
+        type: string
+        default: '0'
+      request_delay_ms:
+        description: 'Delay between requests (ms)'
+        required: false
+        type: string
+        default: '1000'
+      max_minutes:
+        description: 'Job timeout in minutes'
+        required: false
+        type: string
+        default: '300'
+  workflow_call: # Allow it to be called from another repo/workflow
+    inputs:
+      base_url:
+        type: string
+        required: true
+      catalog_id:
+        type: string
+        required: true
+      test_env:
+        type: string
+        required: false
+        default: 'stage'
+      csv_path:
+        type: string
+        required: false
+        default: 'input/migration_redirections.csv'
+      max_rows:
+        type: string
+        required: false
+        default: '0'
+      request_delay_ms:
+        type: string
+        required: false
+        default: '1000'
+      max_minutes:
+        type: string
+        required: false
+        default: '300'
+
+permissions:
+  contents: read
+
+jobs:
+  migration-redirections:
+    name: Migration redirections (${{ inputs.catalog_id }} - ${{ inputs.test_env }})
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.max_minutes) }}
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+      CATALOG_ID: ${{ inputs.catalog_id }}
+      TEST_ENV: ${{ inputs.test_env }}
+      MIGRATION_CSV_PATH: ${{ inputs.csv_path }}
+      MAX_ROWS: ${{ inputs.max_rows }}
+      REQUEST_DELAY_MS: ${{ inputs.request_delay_ms }}
+      MAX_MINUTES: ${{ inputs.max_minutes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium --with-deps
+
+      - name: Install Playwright system deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Check input CSV
+        run: |
+          if [ ! -f "$MIGRATION_CSV_PATH" ]; then
+            echo "::error::CSV not found: $MIGRATION_CSV_PATH"
+            exit 1
+          fi
+          echo "::notice::Checking $(($(wc -l < "$MIGRATION_CSV_PATH") - 1)) rows from $MIGRATION_CSV_PATH against $BASE_URL"
+
+      # xvfb-run gives the browser a display: the spec notes it is only reliable
+      # with headless off, same reason react-testing installs xvfb on its runners.
+      - name: Run migration redirections test
+        id: run_test
+        run: |
+          # Leave 5 minutes of the job budget for the summary and report upload.
+          export TEST_TIMEOUT_MS=$(( (MAX_MINUTES - 5) * 60000 ))
+          xvfb-run --auto-servernum npm run test:migration
+
+      - name: Summarise failures
+        if: always()
+        run: |
+          {
+            echo "## Migration redirections: $CATALOG_ID ($TEST_ENV)"
+            echo ""
+            echo "- Base URL: $BASE_URL"
+            echo "- CSV: \`$MIGRATION_CSV_PATH\`"
+            echo "- Test result: ${{ steps.run_test.outcome }}"
+            REPORT=$(ls test-reports/migration-redirections-*.csv 2>/dev/null | head -1)
+            if [ -n "$REPORT" ]; then
+              echo "- Failure report: \`$(basename "$REPORT")\` ($(($(wc -l < "$REPORT") - 1)) rows), in the \`test-reports\` artifact"
+            else
+              echo "- No failure CSV was written"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-redirections-${{ inputs.catalog_id }}-${{ inputs.test_env }}-${{ github.run_id }}
+          path: |
+            test-reports/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
