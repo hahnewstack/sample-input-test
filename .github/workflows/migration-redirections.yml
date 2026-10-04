@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       csv_url:
-        description: 'Link to the CSV: a Google Sheet (copy the link from the browser) or a URL that downloads the CSV'
+        description: 'Link to the CSV: a Google Sheet (copy the link from the browser) or a URL that downloads the CSV. Format sample: https://docs.google.com/spreadsheets/d/1yf4N3SIzFos5QxdgMD5YOja2Vuj55AKUcukbV3cA-Bs/edit?gid=85580801'
         required: true
         type: string
       catalog_id:

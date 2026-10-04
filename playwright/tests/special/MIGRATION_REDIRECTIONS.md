@@ -41,15 +41,19 @@ One header row, then one row per URL:
 
 Column names are not case-sensitive (`From` or `from`). Empty rows are ignored.
 
-`input/migration_redirections.csv` in the repo is only a **format sample**. The workflow never
-uses it.
+`input/migration_redirections.csv` in the repo and the sample Google Sheet below are only
+**format samples**. The workflow never uses them unless you paste the sample's link.
 
 ### Where to put the CSV
 
 **Option A: Google Sheet (recommended)**
 
-1. Create a Google Sheet, or open your CSV in Google Sheets (File > Import), with the columns above
-   in row 1.
+Sample sheet with the right format:
+https://docs.google.com/spreadsheets/d/1yf4N3SIzFos5QxdgMD5YOja2Vuj55AKUcukbV3cA-Bs/edit?gid=85580801#gid=85580801
+
+1. Open the sample sheet and use **File > Make a copy**, then replace the rows with your URLs.
+   (Or import your CSV into a new Google Sheet with File > Import, keeping the columns above in
+   row 1.) Don't run the test against the sample itself; it is only there to show the format.
 2. Make the sheet readable by the workflow, in one of two ways:
    - **Share > General access > Anyone with the link > Viewer.** Simplest; anyone who has the link
      can read the URL list.
