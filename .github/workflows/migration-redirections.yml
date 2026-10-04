@@ -9,26 +9,26 @@
 # Manual only (plus workflow_call): the test hits a production site once per CSV
 # row, so it should not fire on every push.
 #
-# Every run needs a new CSV, kept on the user's machine rather than in the repo
+# Every run needs a new CSV, which is never committed to the repo
 # (input/migration_redirections.csv is only a format sample and is never used
-# here). Start runs with run_migration.py: it gzips + base64-encodes the local
-# CSV into the csv_data input and dispatches this workflow. GitHub caps all
-# dispatch inputs at 65,535 characters in total; the script checks the encoded
-# size first.
+# here). The CSV is read from a link given when the run starts: a Google Sheet,
+# or any URL that returns the CSV file. See .github/scripts/fetch_csv.py.
+#
+# Private Google Sheets: add a GOOGLE_SERVICE_ACCOUNT_JSON repo secret holding
+# a service account key, and share the sheet with that service account's email.
+# Without the secret, the sheet must be shared as "Anyone with the link: Viewer".
 name: Migration Redirections Test
-# request_id lets run_migration.py find the run it just dispatched.
-run-name: Migration redirections ${{ inputs.catalog_id }} ${{ inputs.test_env }} ${{ inputs.request_id }}
+run-name: Migration redirections ${{ inputs.catalog_id }} ${{ inputs.test_env }}
 
 on:
   workflow_dispatch:
     inputs:
-      base_url:
-        description: 'Base URL used to resolve relative "To" paths'
+      csv_url:
+        description: 'Link to the CSV: a Google Sheet (copy the link from the browser) or a URL that downloads the CSV'
         required: true
         type: string
-        default: 'https://www.mgalleryboutique.com'
       catalog_id:
-        description: 'Site code (used in the report filename)'
+        description: 'Site code (used in the report filename), e.g. lemeu, sof, mgl'
         required: true
         type: string
         default: 'mgl'
@@ -40,10 +40,11 @@ on:
           - stage
           - production
         default: 'stage'
-      csv_data:
-        description: 'Filled in by run_migration.py (the local CSV, gzip+base64). Start runs with that script.'
-        required: true
+      base_url:
+        description: 'Base URL for relative "To" paths (leave empty to use the host of the first "From" link)'
+        required: false
         type: string
+        default: ''
       max_rows:
         description: 'Max CSV rows to check (0 = all)'
         required: false
@@ -59,14 +60,9 @@ on:
         required: false
         type: string
         default: '300'
-      request_id:
-        description: 'Set by run_migration.py to identify the run'
-        required: false
-        type: string
-        default: ''
   workflow_call: # Allow it to be called from another repo/workflow
     inputs:
-      base_url:
+      csv_url:
         type: string
         required: true
       catalog_id:
@@ -76,9 +72,10 @@ on:
         type: string
         required: false
         default: 'stage'
-      csv_data:
+      base_url:
         type: string
-        required: true
+        required: false
+        default: ''
       max_rows:
         type: string
         required: false
@@ -91,6 +88,9 @@ on:
         type: string
         required: false
         default: '300'
+    secrets:
+      GOOGLE_SERVICE_ACCOUNT_JSON:
+        required: false
 
 permissions:
   contents: read
@@ -100,8 +100,9 @@ jobs:
     name: Migration redirections (${{ inputs.catalog_id }} - ${{ inputs.test_env }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ fromJSON(inputs.max_minutes) }}
+    # BASE_URL and MIGRATION_CSV_PATH are not set here: the "Download input CSV"
+    # step writes them to GITHUB_ENV, and a job-level value would override that.
     env:
-      BASE_URL: ${{ inputs.base_url }}
       CATALOG_ID: ${{ inputs.catalog_id }}
       TEST_ENV: ${{ inputs.test_env }}
       MAX_ROWS: ${{ inputs.max_rows }}
@@ -110,6 +111,33 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # First, so a bad link or a sheet that isn't shared fails in seconds, before
+      # any installs.
+      - name: Download input CSV
+        id: csv
+        env:
+          CSV_URL: ${{ inputs.csv_url }}
+          INPUT_BASE_URL: ${{ inputs.base_url }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            pip install --quiet google-auth requests
+          fi
+          export OUT_PATH="$RUNNER_TEMP/migration_redirections.csv"
+          python3 .github/scripts/fetch_csv.py
+
+          # The step's own outputs aren't readable until it ends, so read them back from the file.
+          BASE_URL="${INPUT_BASE_URL:-$(grep '^base_url=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)}"
+          if [ -z "$BASE_URL" ]; then
+            echo "::error::Could not work out a base URL from the CSV's first From link; fill in base_url."
+            exit 1
+          fi
+          BASE_URL="${BASE_URL%/}"
+          echo "BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
+          echo "MIGRATION_CSV_PATH=$OUT_PATH" >> "$GITHUB_ENV"
+          ROWS=$(grep '^rows=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)
+          echo "::notice::Checking $ROWS rows against $BASE_URL"
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
@@ -135,22 +163,6 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
 
-      - name: Prepare input CSV
-        env:
-          CSV_DATA: ${{ inputs.csv_data }}
-        run: |
-          if [ -z "$CSV_DATA" ]; then
-            echo "::error::No CSV was sent. Start this workflow with run_migration.py, which uploads your local CSV."
-            exit 1
-          fi
-          MIGRATION_CSV_PATH="$RUNNER_TEMP/migration_redirections.csv"
-          if ! printf '%s' "$CSV_DATA" | base64 -d | gunzip > "$MIGRATION_CSV_PATH"; then
-            echo "::error::csv_data is not valid gzip+base64. Start this workflow with run_migration.py."
-            exit 1
-          fi
-          echo "MIGRATION_CSV_PATH=$MIGRATION_CSV_PATH" >> "$GITHUB_ENV"
-          echo "::notice::Checking $(($(wc -l < "$MIGRATION_CSV_PATH") - 1)) rows from the uploaded CSV against $BASE_URL"
-
       # xvfb-run gives the browser a display: the spec notes it is only reliable
       # with headless off, same reason react-testing installs xvfb on its runners.
       - name: Run migration redirections test
@@ -162,13 +174,15 @@ jobs:
 
       - name: Summarise failures
         if: always()
+        env:
+          CSV_URL: ${{ inputs.csv_url }}
         run: |
           {
             echo "## Migration redirections: $CATALOG_ID ($TEST_ENV)"
             echo ""
-            echo "- Base URL: $BASE_URL"
-            echo "- CSV: uploaded by run_migration.py"
-            echo "- Test result: ${{ steps.run_test.outcome }}"
+            echo "- CSV: $CSV_URL (${{ steps.csv.outputs.rows || '?' }} rows)"
+            echo "- Base URL: ${BASE_URL:-not set}"
+            echo "- Test result: ${{ steps.run_test.outcome || 'not run' }}"
             REPORT=$(ls test-reports/migration-redirections-*.csv 2>/dev/null | head -1)
             if [ -n "$REPORT" ]; then
               echo "- Failure report: \`$(basename "$REPORT")\` ($(($(wc -l < "$REPORT") - 1)) rows), in the \`test-reports\` artifact"
