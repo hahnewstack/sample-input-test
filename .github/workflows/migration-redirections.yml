@@ -8,7 +8,16 @@
 #
 # Manual only (plus workflow_call): the test hits a production site once per CSV
 # row, so it should not fire on every push.
+#
+# Every run needs a new CSV, kept on the user's machine rather than in the repo
+# (input/migration_redirections.csv is only a format sample and is never used
+# here). Start runs with run_migration.py: it gzips + base64-encodes the local
+# CSV into the csv_data input and dispatches this workflow. GitHub caps all
+# dispatch inputs at 65,535 characters in total; the script checks the encoded
+# size first.
 name: Migration Redirections Test
+# request_id lets run_migration.py find the run it just dispatched.
+run-name: Migration redirections ${{ inputs.catalog_id }} ${{ inputs.test_env }} ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
@@ -31,11 +40,10 @@ on:
           - stage
           - production
         default: 'stage'
-      csv_path:
-        description: 'CSV of redirections, relative to the repo root'
-        required: false
+      csv_data:
+        description: 'Filled in by run_migration.py (the local CSV, gzip+base64). Start runs with that script.'
+        required: true
         type: string
-        default: 'input/migration_redirections.csv'
       max_rows:
         description: 'Max CSV rows to check (0 = all)'
         required: false
@@ -51,6 +59,11 @@ on:
         required: false
         type: string
         default: '300'
+      request_id:
+        description: 'Set by run_migration.py to identify the run'
+        required: false
+        type: string
+        default: ''
   workflow_call: # Allow it to be called from another repo/workflow
     inputs:
       base_url:
@@ -63,10 +76,9 @@ on:
         type: string
         required: false
         default: 'stage'
-      csv_path:
+      csv_data:
         type: string
-        required: false
-        default: 'input/migration_redirections.csv'
+        required: true
       max_rows:
         type: string
         required: false
@@ -92,7 +104,6 @@ jobs:
       BASE_URL: ${{ inputs.base_url }}
       CATALOG_ID: ${{ inputs.catalog_id }}
       TEST_ENV: ${{ inputs.test_env }}
-      MIGRATION_CSV_PATH: ${{ inputs.csv_path }}
       MAX_ROWS: ${{ inputs.max_rows }}
       REQUEST_DELAY_MS: ${{ inputs.request_delay_ms }}
       MAX_MINUTES: ${{ inputs.max_minutes }}
@@ -124,13 +135,21 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
 
-      - name: Check input CSV
+      - name: Prepare input CSV
+        env:
+          CSV_DATA: ${{ inputs.csv_data }}
         run: |
-          if [ ! -f "$MIGRATION_CSV_PATH" ]; then
-            echo "::error::CSV not found: $MIGRATION_CSV_PATH"
+          if [ -z "$CSV_DATA" ]; then
+            echo "::error::No CSV was sent. Start this workflow with run_migration.py, which uploads your local CSV."
             exit 1
           fi
-          echo "::notice::Checking $(($(wc -l < "$MIGRATION_CSV_PATH") - 1)) rows from $MIGRATION_CSV_PATH against $BASE_URL"
+          MIGRATION_CSV_PATH="$RUNNER_TEMP/migration_redirections.csv"
+          if ! printf '%s' "$CSV_DATA" | base64 -d | gunzip > "$MIGRATION_CSV_PATH"; then
+            echo "::error::csv_data is not valid gzip+base64. Start this workflow with run_migration.py."
+            exit 1
+          fi
+          echo "MIGRATION_CSV_PATH=$MIGRATION_CSV_PATH" >> "$GITHUB_ENV"
+          echo "::notice::Checking $(($(wc -l < "$MIGRATION_CSV_PATH") - 1)) rows from the uploaded CSV against $BASE_URL"
 
       # xvfb-run gives the browser a display: the spec notes it is only reliable
       # with headless off, same reason react-testing installs xvfb on its runners.
@@ -148,7 +167,7 @@ jobs:
             echo "## Migration redirections: $CATALOG_ID ($TEST_ENV)"
             echo ""
             echo "- Base URL: $BASE_URL"
-            echo "- CSV: \`$MIGRATION_CSV_PATH\`"
+            echo "- CSV: uploaded by run_migration.py"
             echo "- Test result: ${{ steps.run_test.outcome }}"
             REPORT=$(ls test-reports/migration-redirections-*.csv 2>/dev/null | head -1)
             if [ -n "$REPORT" ]; then
