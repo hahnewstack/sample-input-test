@@ -1,0 +1,17 @@
+{
+  "name": "sample-input-test",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone sample: migration redirections Playwright test (extracted from react-testing)",
+  "scripts": {
+    "test": "playwright test",
+    "test:migration": "playwright test playwright/tests/special/migration_redirections.spec.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.52.0",
+    "@types/node": "^20.12.7",
+    "csv-parser": "^3.0.0",
+    "typescript": "^5.8.3"
+  }
+}
