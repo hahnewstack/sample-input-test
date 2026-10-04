@@ -87,7 +87,7 @@ A file path on your PC (`C:\Users\...`) does **not** work: GitHub's servers can'
    | `base_url` | Leave empty to use the host of the first `From` link (e.g. `https://europe.shoplemeridien.com`). Fill in only if relative `To` paths belong to a different host. |
    | `max_rows` | `0` checks every row. Use e.g. `5` for a quick check of a new CSV. |
    | `request_delay_ms` | Pause between URLs in milliseconds. Default `1000`. |
-   | `max_minutes` | Time limit for the job. Default `300`. |
+   | `max_minutes` | Time limit for the job. Default `60`; raise it for very large sheets. |
 
 4. Click the green **Run workflow** button. The run appears in the list after a few seconds.
 

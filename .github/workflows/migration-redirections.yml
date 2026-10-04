@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       csv_url:
-        description: 'Link to the CSV: a Google Sheet (copy the link from the browser) or a URL that downloads the CSV. Format sample: https://docs.google.com/spreadsheets/d/1yf4N3SIzFos5QxdgMD5YOja2Vuj55AKUcukbV3cA-Bs/edit?gid=85580801'
+        description: 'Link to the CSV: a Google Sheet (copy the link from the browser). Format sample: https://docs.google.com/spreadsheets/d/1yf4N3SIzFos5QxdgMD5YOja2Vuj55AKUcukbV3cA-Bs/edit?gid=85580801'
         required: true
         type: string
       catalog_id:
@@ -59,7 +59,7 @@ on:
         description: 'Job timeout in minutes'
         required: false
         type: string
-        default: '300'
+        default: '60'
   workflow_call: # Allow it to be called from another repo/workflow
     inputs:
       csv_url:
@@ -87,7 +87,7 @@ on:
       max_minutes:
         type: string
         required: false
-        default: '300'
+        default: '60'
     secrets:
       GOOGLE_SERVICE_ACCOUNT_JSON:
         required: false
