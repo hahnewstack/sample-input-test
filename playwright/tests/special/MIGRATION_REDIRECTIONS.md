@@ -35,11 +35,11 @@ One header row, then one row per URL:
 | Column | Required | Meaning |
 |---|---|---|
 | `Sources` | No | Where the URL came from (Sitemap, GSC, ...). For your reference only. |
-| `Lang` | Yes | `en`, `fr`, `de` or `es`. |
-| `From` | Yes | The old URL. Use a full URL (`https://...`). |
+| `Lang` | No | `en`, `fr`, `de` or `es`. If the column is missing, each row's language is taken from the start of its URL (`/fr/...` gives `fr`; for `/gb/...` or `/uk/...` the `To` URL's language is used). |
+| `From` | Yes | The old URL: a full URL (`https://...`) or a path (`/fr/...`) that is added to the base URL. A column named `Redirect from` also works. |
 | `To` | Yes | The expected new URL. A full URL, or a path like `/de/c/...` that is added to the base URL. |
 
-Column names are not case-sensitive (`From` or `from`). Empty rows are ignored.
+Column names are not case-sensitive (`From` or `from`). Empty rows are ignored. Rows whose language isn't `en`, `fr`, `de` or `es` are skipped; the run shows a warning with how many.
 
 `input/migration_redirections.csv` in the repo and the sample Google Sheet below are only
 **format samples**. The workflow never uses them unless you paste the sample's link.
@@ -141,7 +141,7 @@ Errors appear on the run's page, at the **Download input CSV** step.
 | `Google returned a sign-in page` or `Google returned 401/403/404` | The sheet isn't readable: share it as "Anyone with the link: Viewer", or with the service account. Check the link is complete. |
 | `... returned a web page, not a CSV file` | The link opens a page instead of downloading the file. Use the direct download link. |
 | `Download failed: HTTP <code>` / `Could not reach` | The server refused the download or isn't reachable from the internet. |
-| `CSV is missing column(s)` | Fix row 1; it needs `Lang`, `From` and `To` columns. |
+| `CSV is missing column(s)` | Fix row 1; it needs a `From` (or `Redirect from`) column and a `To` column. |
 | `CSV has a header row but no data rows` | The sheet tab in the link is empty; check `#gid=` points at the right tab. |
 | `Could not work out a base URL` | The first `From` value isn't a full URL; fix it, or fill in `base_url`. |
 

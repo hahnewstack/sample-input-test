@@ -137,7 +137,11 @@ jobs:
           echo "BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
           echo "MIGRATION_CSV_PATH=$OUT_PATH" >> "$GITHUB_ENV"
           ROWS=$(grep '^rows=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)
-          echo "::notice::Checking $ROWS rows against $BASE_URL"
+          if [ "${MAX_ROWS:-0}" -gt 0 ] && [ "$MAX_ROWS" -lt "$ROWS" ]; then
+            echo "::notice::$ROWS rows downloaded; checking the first $MAX_ROWS against $BASE_URL"
+          else
+            echo "::notice::Checking all $ROWS rows against $BASE_URL"
+          fi
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
